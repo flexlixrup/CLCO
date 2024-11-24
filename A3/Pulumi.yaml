@@ -1,0 +1,82 @@
+#repo URL: https://github.com/flexlixrup/CLCO
+name: A3
+description: A minimal Azure Native Pulumi YAML program
+runtime: yaml
+config:
+  azure-native:location: "WestUS"
+
+resources:
+  resourceGroup:
+    type: azure-native:resources:ResourceGroup
+    properties:
+      resourceGroupName: "myResourceGroup"
+      location: ${azure-native:location}
+
+  randomSuffix:
+    type: random:index/randomString:RandomString
+    properties:
+      length: 8
+      special: false
+      upper: false
+      number: true
+
+  storageAccount:
+    type: azure-native:storage:StorageAccount
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      accountName: mystorage${randomSuffix.result}
+      location: ${resourceGroup.location}
+      sku:
+        name: "Standard_LRS"
+      kind: "StorageV2"
+      allowBlobPublicAccess: true
+
+  blobContainer:
+    type: azure-native:storage:BlobContainer
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      accountName: ${storageAccount.name}
+      containerName: "appcode"
+      publicAccess: "Blob"
+
+  codeBlob:
+    type: azure-native:storage:Blob
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      accountName: ${storageAccount.name}
+      containerName: ${blobContainer.name}
+      blobName: "app_code.zip"
+      type: "Block"
+      source:
+        fn::fileAsset: "./app_code.zip"
+
+  appServicePlan:
+    type: azure-native:web:AppServicePlan
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      name: "myAppServicePlan"
+      location: ${resourceGroup.location}
+      sku:
+        name: "B1"
+        tier: "Basic"
+      kind: "Linux"
+      reserved: true
+
+  webApp:
+    type: azure-native:web:WebApp
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      name: mywebapp${randomSuffix.result}
+      location: ${resourceGroup.location}
+      serverFarmId: ${appServicePlan.id}
+      siteConfig:
+        linuxFxVersion: "PYTHON|3.8"
+        appSettings:
+          - name: "WEBSITE_RUN_FROM_PACKAGE"
+            value: >-
+              https://${storageAccount.name}.blob.core.windows.net/${blobContainer.name}/${codeBlob.blobName}
+      clientAffinityEnabled: false
+      httpsOnly: true
+
+outputs:
+  webAppUrl: https://${webApp.defaultHostName}
