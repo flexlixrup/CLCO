@@ -1,0 +1,4 @@
+config:
+  azure-native:location: WestUS
+  my:repoUrl: https://github.com/flexlixrup/clco-demo
+  my:branch: main

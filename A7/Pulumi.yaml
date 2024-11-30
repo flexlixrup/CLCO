@@ -1,0 +1,156 @@
+name: A7
+description: A minimal Azure Native Pulumi YAML program
+runtime: yaml
+resources:
+  resourceGroup:
+    type: azure-native:resources:ResourceGroup
+
+  virtualNetwork:
+    type: azure-native:network:VirtualNetwork
+    name: myVNet
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      location: ${azure-native:location}
+      addressSpace:
+        addressPrefixes:
+          - 10.0.0.0/16
+
+  appSubnet:
+    type: azure-native:network:Subnet
+    properties:
+      subnetName: appSubnet
+      resourceGroupName: ${resourceGroup.name}
+      virtualNetworkName: ${virtualNetwork.name}
+      addressPrefix: 10.0.0.0/24
+      delegations:
+        - name: delegation
+          serviceName: Microsoft.Web/serverfarms
+      privateEndpointNetworkPolicies: Enabled
+
+  endpointSubnet:
+    type: azure-native:network:Subnet
+    name: endpointSubnet
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      virtualNetworkName: ${virtualNetwork.name}
+      addressPrefix: 10.0.1.0/24
+      privateEndpointNetworkPolicies: Disabled
+
+  dnsZone:
+    type: azure-native:network:PrivateZone
+    name: privatelink.cognitiveservices.azure.com
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      location: global
+
+  languageAccount:
+    type: azure-native:cognitiveservices:Account
+    name: myLanguageService
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      location: ${azure-native:location}
+      kind: TextAnalytics  # or 'Language' if needed
+      sku:
+        name: F0
+      properties:
+        publicNetworkAccess: Disabled
+        customSubDomainName: myLanguageService1234
+
+  accountKeys:
+    type: pulumi:pulumi:Invoke
+    properties:
+      function: azure-native:cognitiveservices:listAccountKeys
+      arguments:
+        resourceGroupName: ${resourceGroup.name}
+        accountName: ${languageAccount.name}
+
+  dnsZoneVirtualNetworkLink:
+    type: azure-native:network:VirtualNetworkLink
+    name: cognitiveservices-zonelink
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      privateZoneName: ${dnsZone.name}
+      location: global
+      virtualNetwork:
+        id: ${virtualNetwork.id}
+      registrationEnabled: false
+
+  privateEndpoint:
+    type: azure-native:network:PrivateEndpoint
+    name: languagePrivateEndpoint
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      location: ${azure-native:location}
+      subnet:
+        id: ${endpointSubnet.id}
+      privateLinkServiceConnections:
+        - name: languageServiceConnection
+          privateLinkServiceId: ${languageAccount.id}
+          groupIds:
+            - account
+
+  privateDnsZoneGroup:
+    type: azure-native:network:PrivateDnsZoneGroup
+    name: languagePrivateDnsZoneGroup
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      privateEndpointName: ${privateEndpoint.name}
+      privateDnsZoneConfigs:
+        - name: config
+          privateDnsZoneId: ${dnsZone.id}
+
+  appServicePlan:
+    type: azure-native:web:AppServicePlan
+    name: myWebApp-plan
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      location: ${azure-native:location}
+      sku:
+        name: B1
+        tier: Basic
+      kind: linux
+      reserved: true
+
+  webApp:
+    type: azure-native:web:WebApp
+    name: myWebApp
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      location: ${azure-native:location}
+      serverFarmId: ${appServicePlan.id}
+      httpsOnly: true
+      kind: app,linux
+      siteConfig:
+        linuxFxVersion: "PYTHON|3.8" 
+        appSettings:
+          - name: AZ_ENDPOINT
+            value: ${languageAccount.properties.endpoint}
+          - name: AZ_KEY
+            value: ${accountKeys.outputs.key1}
+          - name: WEBSITE_RUN_FROM_PACKAGE
+            value: "0"
+        alwaysOn: true
+        ftpsState: Disabled
+
+  vnetIntegration:
+    type: azure-native:web:WebAppSwiftVirtualNetworkConnection
+    properties:
+      name: ${webApp.name}
+      resourceGroupName: ${resourceGroup.name}
+      subnetResourceId: ${appSubnet.id}
+
+  sourceControl:
+    type: azure-native:web:WebAppSourceControl
+    properties:
+      name: ${webApp.name}
+      resourceGroupName: ${resourceGroup.name}
+      repoUrl: ${my:repoUrl}
+      branch: ${my:branch}
+      isManualIntegration: true 
+      deploymentRollbackEnabled: false
+      isGitHubAction: false
+
+config:
+  azure-native:location: WestUS
+  my:repoUrl: https://github.com/flexlixrup/clco-demo
+  my:branch: main
