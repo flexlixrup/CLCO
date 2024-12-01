@@ -1,3 +1,6 @@
+# Security lookup is not available with YAML but I did the lookup with the az command line and confirmed the correct creation of the security rules.
+# I checked the unavailabbility of other ports by trying to access them from the browser and they were not accessible.
+
 name: A9
 description: A minimal Azure Native Pulumi YAML program
 runtime: yaml
@@ -37,7 +40,7 @@ resources:
     properties:
       resourceGroupName: ${myResourceGroup.name}
       networkSecurityGroupName: ${nsg.name}
-      securityRuleName: Allow-80-Inbound
+      securityRuleName: allow-http
       priority: 110
       direction: Inbound
       access: Allow

@@ -1,0 +1,3 @@
+config:
+  azure-native:location: WestUS2
+  azure:subscriptionId: 009d307a-a6d9-4bdf-a0ff-8502c4bb04fe
