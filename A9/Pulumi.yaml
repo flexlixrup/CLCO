@@ -1,0 +1,254 @@
+# Security lookup is not available with YAML but I did the lookup with the az command line and confirmed the correct creation of the security rules.
+# I checked the unavailabbility of other ports by trying to access them from the browser and they were not accessible.
+
+name: A9
+description: A minimal Azure Native Pulumi YAML program
+runtime: yaml
+resources:
+  myResourceGroup:
+    type: azure-native:resources:ResourceGroup
+    properties:
+      resourceGroupName: A9
+
+  vnet:
+    type: azure-native:network:VirtualNetwork
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      virtualNetworkName: ${myResourceGroup.name}-vnet
+      addressSpace:
+        addressPrefixes:
+          - "10.0.0.0/16"
+
+  subnet:
+    type: azure-native:network:Subnet
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      virtualNetworkName: ${vnet.name}
+      subnetName: ${myResourceGroup.name}-subnet
+      addressPrefix: "10.0.1.0/24"
+
+  nsg:
+    type: azure-native:network:NetworkSecurityGroup
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      networkSecurityGroupName: ${myResourceGroup.name}-nsg
+
+  allow80InboundRule:
+    type: azure-native:network:SecurityRule
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      networkSecurityGroupName: ${nsg.name}
+      securityRuleName: allow-http
+      priority: 110
+      direction: Inbound
+      access: Allow
+      protocol: Tcp
+      sourcePortRange: "*"
+      destinationPortRange: "80"
+      sourceAddressPrefix: "*"
+      destinationAddressPrefix: "*"
+
+  publicIp:
+    type: azure-native:network:PublicIPAddress
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      publicIpAddressName: myPublicIP
+      sku:
+        name: Standard
+      publicIPAllocationMethod: Static
+      zones:
+        - "1"
+        - "2"
+        - "3"
+
+  loadBalancer:
+    type: azure-native:network:LoadBalancer
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      loadBalancerName: myLoadBalancer
+      sku:
+        name: Standard
+      frontendIPConfigurations:
+        - name: myFrontEnd
+          publicIPAddress:
+            id: ${publicIp.id}
+      backendAddressPools:
+        - name: myBackEndPool
+      probes:
+        - name: httpProbe
+          protocol: Http
+          port: 80
+          requestPath: "/"
+          intervalInSeconds: 15
+          numberOfProbes: 2
+      loadBalancingRules:
+        - name: httpRule
+          frontendIPConfiguration:
+            id: /subscriptions/009d307a-a6d9-4bdf-a0ff-8502c4bb04fe/resourceGroups/A9/providers/Microsoft.Network/loadBalancers/myLoadBalancer/frontendIPConfigurations/myFrontEnd
+          backendAddressPool:
+            id: /subscriptions/009d307a-a6d9-4bdf-a0ff-8502c4bb04fe/resourceGroups/A9/providers/Microsoft.Network/loadBalancers/myLoadBalancer/backendAddressPools/myBackEndPool
+          probe:
+            id: /subscriptions/009d307a-a6d9-4bdf-a0ff-8502c4bb04fe/resourceGroups/A9/providers/Microsoft.Network/loadBalancers/myLoadBalancer/probes/httpProbe
+          protocol: Tcp
+          frontendPort: 80
+          backendPort: 80
+          enableFloatingIP: false
+          idleTimeoutInMinutes: 4
+          loadDistribution: Default
+
+  nic1:
+    type: azure-native:network:NetworkInterface
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      networkInterfaceName: ${myResourceGroup.name}-nic1
+      ipConfigurations:
+        - name: ipconfig1
+          subnet:
+            id: ${subnet.id}
+          privateIPAllocationMethod: Dynamic
+          loadBalancerBackendAddressPools:
+            - id: ${loadBalancer.id}/backendAddressPools/myBackEndPool
+      networkSecurityGroup:
+        id: ${nsg.id}
+
+  nic2:
+    type: azure-native:network:NetworkInterface
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      networkInterfaceName: ${myResourceGroup.name}-nic2
+      ipConfigurations:
+        - name: ipconfig1
+          subnet:
+            id: ${subnet.id}
+          privateIPAllocationMethod: Dynamic
+          loadBalancerBackendAddressPools:
+            - id: ${loadBalancer.id}/backendAddressPools/myBackEndPool
+      networkSecurityGroup:
+        id: ${nsg.id}
+
+  vm1:
+    type: azure-native:compute:VirtualMachine
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      vmName: ${myResourceGroup.name}-vm1
+      networkProfile:
+        networkInterfaces:
+          - id: ${nic1.id}
+      hardwareProfile:
+        vmSize: Standard_DS1_v2
+      storageProfile:
+        osDisk:
+          createOption: FromImage
+        imageReference:
+          publisher: Canonical
+          offer: 0001-com-ubuntu-server-jammy
+          sku: 22_04-lts
+          version: latest
+        dataDisks:
+          - lun: 0
+            createOption: Attach
+            managedDisk:
+              id: ${disk1.id}
+      osProfile:
+        computerName: vm1
+        adminUsername: azureuser
+        adminPassword: P@ssw0rd1234!
+
+  vm2:
+    type: azure-native:compute:VirtualMachine
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      vmName: ${myResourceGroup.name}-vm2
+      networkProfile:
+        networkInterfaces:
+          - id: ${nic2.id}
+      hardwareProfile:
+        vmSize: Standard_DS1_v2
+      storageProfile:
+        osDisk:
+          createOption: FromImage
+        imageReference:
+          publisher: Canonical
+          offer: 0001-com-ubuntu-server-jammy
+          sku: 22_04-lts
+          version: latest
+        dataDisks:
+          - lun: 0
+            createOption: Attach
+            managedDisk:
+              id: ${disk2.id}
+      osProfile:
+        computerName: vm2
+        adminUsername: azureuser
+        adminPassword: P@ssw0rd1234!
+
+  vm1Extension:
+    type: azure-native:compute:VirtualMachineExtension
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      vmName: ${vm1.name}
+      vmExtensionName: installNginx
+      publisher: Microsoft.Azure.Extensions
+      type: CustomScript
+      typeHandlerVersion: "2.1"
+      autoUpgradeMinorVersion: true
+      settings:
+        commandToExecute: |
+          sudo apt-get update
+          sudo apt-get install -y nginx
+          echo "<head><title>Web server 1</title></head><body><h1>Web Portal</h1><p>Web server 1</p></body>" | sudo tee /var/www/html/index.nginx-debian.html
+          sudo systemctl restart nginx
+
+  vm2Extension:
+    type: azure-native:compute:VirtualMachineExtension
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      vmName: ${vm2.name}
+      vmExtensionName: installNginx
+      publisher: Microsoft.Azure.Extensions
+      type: CustomScript
+      typeHandlerVersion: "2.1"
+      autoUpgradeMinorVersion: true
+      settings:
+        commandToExecute: |
+          sudo apt-get update
+          sudo apt-get install -y nginx
+          echo "<head><title>Web server 2</title></head><body><h1>Web Portal</h1><p>Web server 2</p></body>" | sudo tee /var/www/html/index.nginx-debian.html
+          sudo systemctl restart nginx
+
+  disk1:
+    type: azure-native:compute:Disk
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      diskName: ${myResourceGroup.name}-disk1
+      location: ${myResourceGroup.location}
+      diskSizeGB: 1024
+      sku:
+        name: Standard_LRS
+      creationData:
+        createOption: Empty
+
+  disk2:
+    type: azure-native:compute:Disk
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      diskName: ${myResourceGroup.name}-disk2
+      location: ${myResourceGroup.location}
+      diskSizeGB: 1024
+      sku:
+        name: Standard_LRS
+      creationData:
+        createOption: Empty
+
+outputs:
+  publicIpAddress:
+    value: ${publicIp.ipAddress}
