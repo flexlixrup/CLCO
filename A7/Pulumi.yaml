@@ -1,6 +1,7 @@
 name: A7
 description: A minimal Azure Native Pulumi YAML program
 runtime: yaml
+
 resources:
   resourceGroup:
     type: azure-native:resources:ResourceGroup
@@ -40,6 +41,7 @@ resources:
     type: azure-native:network:PrivateZone
     name: privatelink.cognitiveservices.azure.com
     properties:
+      privateZoneName: privatelink.cognitiveservices.azure.com
       resourceGroupName: ${resourceGroup.name}
       location: global
 
@@ -47,22 +49,16 @@ resources:
     type: azure-native:cognitiveservices:Account
     name: myLanguageService
     properties:
+      identity:
+          type: SystemAssigned
       resourceGroupName: ${resourceGroup.name}
       location: ${azure-native:location}
-      kind: TextAnalytics  # or 'Language' if needed
+      kind: TextAnalytics  
       sku:
         name: F0
       properties:
         publicNetworkAccess: Disabled
         customSubDomainName: myLanguageService1234
-
-  accountKeys:
-    type: pulumi:pulumi:Invoke
-    properties:
-      function: azure-native:cognitiveservices:listAccountKeys
-      arguments:
-        resourceGroupName: ${resourceGroup.name}
-        accountName: ${languageAccount.name}
 
   dnsZoneVirtualNetworkLink:
     type: azure-native:network:VirtualNetworkLink
@@ -124,9 +120,14 @@ resources:
         linuxFxVersion: "PYTHON|3.8" 
         appSettings:
           - name: AZ_ENDPOINT
-            value: ${languageAccount.properties.endpoint}
+            value:
+              fn::join:
+                  - ""
+                  - - "https://"
+                    - mylanguageservice1234.
+                    - "cognitiveservices.azure.com/"
           - name: AZ_KEY
-            value: ${accountKeys.outputs.key1}
+            value: ${accountKeys.key1}
           - name: WEBSITE_RUN_FROM_PACKAGE
             value: "0"
         alwaysOn: true
@@ -154,3 +155,13 @@ config:
   azure-native:location: WestUS
   my:repoUrl: https://github.com/flexlixrup/clco-demo
   my:branch: main
+
+
+variables:
+  accountKeys:
+    fn::invoke:
+      function: azure-native:cognitiveservices:listAccountKeys
+      arguments:
+        resourceGroupName: ${resourceGroup.name}
+        accountName: ${languageAccount.name}
+    
