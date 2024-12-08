@@ -1,0 +1,326 @@
+config:
+  azure-native:location: germanywestcentral
+name: IaaS
+description: Create a load balancer with two VMs
+runtime: yaml
+
+resources:
+  sa:
+    type: azure-native:storage:StorageAccount
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      sku:
+        name: Standard_LRS
+      kind: StorageV2
+      
+  myResourceGroup:
+    type: azure-native:resources:ResourceGroup
+    properties:
+      resourceGroupName: rg2
+
+  vnet:
+    type: azure-native:network:VirtualNetwork
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      virtualNetworkName: ${myResourceGroup.name}-vnet
+      addressSpace:
+        addressPrefixes:
+          - "10.0.0.0/16"
+
+  subnet:
+    type: azure-native:network:Subnet
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      virtualNetworkName: ${vnet.name}
+      subnetName: ${myResourceGroup.name}-subnet
+      addressPrefix: "10.0.1.0/24"
+
+  nsg:
+    type: azure-native:network:NetworkSecurityGroup
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      networkSecurityGroupName: ${myResourceGroup.name}-nsg
+
+  allow80InboundRule:
+    type: azure-native:network:SecurityRule
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      networkSecurityGroupName: ${nsg.name}
+      securityRuleName: Allow-80-Inbound
+      priority: 110
+      direction: Inbound
+      access: Allow
+      protocol: Tcp
+      sourcePortRange: "*"
+      destinationPortRange: "80"
+      sourceAddressPrefix: "*"
+      destinationAddressPrefix: "*"
+
+  publicIp:
+    type: azure-native:network:PublicIPAddress
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      publicIpAddressName: myPublicIP
+      sku:
+        name: Standard
+      publicIPAllocationMethod: Static
+      zones:
+        - "1"
+        - "2"
+        - "3"
+
+  loadBalancer:
+    type: azure-native:network:LoadBalancer
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      loadBalancerName: myLoadBalancer
+      sku:
+        name: Standard
+      frontendIPConfigurations:
+        - name: myFrontEnd
+          publicIPAddress:
+            id: ${publicIp.id}
+      backendAddressPools:
+        - name: myBackEndPool
+      probes:
+        - name: httpProbe
+          protocol: Http
+          port: 80
+          requestPath: "/"
+          intervalInSeconds: 15
+          numberOfProbes: 2
+      loadBalancingRules:
+        - name: httpRule
+          frontendIPConfiguration:
+            id: /subscriptions/0e4dc046-40b5-4d62-a494-2e25538e24df/resourceGroups/rg2/providers/Microsoft.Network/loadBalancers/myLoadBalancer/frontendIPConfigurations/myFrontEnd
+          backendAddressPool:
+            id: /subscriptions/0e4dc046-40b5-4d62-a494-2e25538e24df/resourceGroups/rg2/providers/Microsoft.Network/loadBalancers/myLoadBalancer/backendAddressPools/myBackEndPool
+          probe:
+            id: /subscriptions/0e4dc046-40b5-4d62-a494-2e25538e24df/resourceGroups/rg2/providers/Microsoft.Network/loadBalancers/myLoadBalancer/probes/httpProbe
+          protocol: Tcp
+          frontendPort: 80
+          backendPort: 80
+          enableFloatingIP: false
+          idleTimeoutInMinutes: 4
+          loadDistribution: Default
+
+  nic1:
+    type: azure-native:network:NetworkInterface
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      networkInterfaceName: ${myResourceGroup.name}-nic1
+      ipConfigurations:
+        - name: ipconfig1
+          subnet:
+            id: ${subnet.id}
+          privateIPAllocationMethod: Dynamic
+          loadBalancerBackendAddressPools:
+            - id: ${loadBalancer.id}/backendAddressPools/myBackEndPool
+      networkSecurityGroup:
+        id: ${nsg.id}
+
+  nic2:
+    type: azure-native:network:NetworkInterface
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      networkInterfaceName: ${myResourceGroup.name}-nic2
+      ipConfigurations:
+        - name: ipconfig1
+          subnet:
+            id: ${subnet.id}
+          privateIPAllocationMethod: Dynamic
+          loadBalancerBackendAddressPools:
+            - id: ${loadBalancer.id}/backendAddressPools/myBackEndPool
+      networkSecurityGroup:
+        id: ${nsg.id}
+
+  vm1:
+    type: azure-native:compute:VirtualMachine
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      vmName: ${myResourceGroup.name}-vm1
+      networkProfile:
+        networkInterfaces:
+          - id: ${nic1.id}
+      hardwareProfile:
+        vmSize: Standard_DS1_v2
+      diagnosticsProfile:
+        bootDiagnostics:
+          enabled: true
+          storageUri:  ${sa.primaryEndpoints.blob}
+      storageProfile:
+        osDisk:
+          createOption: FromImage
+        imageReference:
+          publisher: Canonical
+          offer: 0001-com-ubuntu-server-jammy
+          sku: 22_04-lts
+          version: latest
+        dataDisks:
+        - lun: 0
+          createOption: Attach
+          managedDisk:
+            id: ${disk1.id}
+      osProfile:
+        adminUsername: azureuser
+        computerName: vm1
+        linuxConfiguration:
+          disablePasswordAuthentication: true
+          ssh:
+            publicKeys:
+              - keyData: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDHek23ia0vMDzs0lo9jtEQ72XSMu6c4HV+xD3DwAx58MQxTKjwomCd4MKHW11iMyF0YK7L+Nma9sVrGjMHOvNyB4oJCniYvas12fzeAlYWAodTFufuP6D3xQuc2dqI+ePyLWRGfwMx9nT89eKSf53eTyAsXkAymZctOc9n4H7aaP/3lGSkrDWbk428kkOdvCypiE6sH53/P9zQSSMAtlt1K2b9ga1yZqifjWbd8DtZKXU83WQURN95B+P4nfVg8xERz7Q2H6h7gmZ70DGfheKJPR6JzlqoMp4FkeWLhrZVPoiMU8JMjfIy7vth6cUePHBP9aQ9JC+JGJyJKuCJnoFp bruno@LAPTOP-DQK8700Q
+                path: /home/azureuser/.ssh/authorized_keys
+
+  vm2:
+    type: azure-native:compute:VirtualMachine
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      vmName: ${myResourceGroup.name}-vm2
+      networkProfile:
+        networkInterfaces:
+          - id: ${nic2.id}
+      hardwareProfile:
+        vmSize: Standard_DS1_v2
+      diagnosticsProfile:
+        bootDiagnostics:
+          enabled: true
+          storageUri:  ${sa.primaryEndpoints.blob}
+      storageProfile:
+        osDisk:
+          createOption: FromImage
+        imageReference:
+          publisher: Canonical
+          offer: 0001-com-ubuntu-server-jammy
+          sku: 22_04-lts
+          version: latest
+        dataDisks:
+        - lun: 0
+          createOption: Attach
+          managedDisk:
+            id: ${disk2.id}
+      osProfile:
+        adminUsername: azureuser
+        computerName: vm2
+        linuxConfiguration:
+          disablePasswordAuthentication: true
+          ssh:
+            publicKeys:
+              - keyData: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDHek23ia0vMDzs0lo9jtEQ72XSMu6c4HV+xD3DwAx58MQxTKjwomCd4MKHW11iMyF0YK7L+Nma9sVrGjMHOvNyB4oJCniYvas12fzeAlYWAodTFufuP6D3xQuc2dqI+ePyLWRGfwMx9nT89eKSf53eTyAsXkAymZctOc9n4H7aaP/3lGSkrDWbk428kkOdvCypiE6sH53/P9zQSSMAtlt1K2b9ga1yZqifjWbd8DtZKXU83WQURN95B+P4nfVg8xERz7Q2H6h7gmZ70DGfheKJPR6JzlqoMp4FkeWLhrZVPoiMU8JMjfIy7vth6cUePHBP9aQ9JC+JGJyJKuCJnoFp bruno@LAPTOP-DQK8700Q
+                path: /home/azureuser/.ssh/authorized_keys
+
+  vm1Extension:
+    type: azure-native:compute:VirtualMachineExtension
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      vmName: ${vm1.name}
+      vmExtensionName: installNginx
+      publisher: Microsoft.Azure.Extensions
+      type: CustomScript
+      typeHandlerVersion: "2.1"
+      autoUpgradeMinorVersion: true
+      settings:
+        commandToExecute: |
+          sudo apt-get update
+          sudo apt-get install -y nginx
+          echo "<head><title>Web server 1</title></head><body><h1>Web Portal</h1><p>Web server 1</p></body>" | sudo tee /var/www/html/index.nginx-debian.html
+          sudo systemctl restart nginx
+
+  vm2Extension:
+    type: azure-native:compute:VirtualMachineExtension
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      
+      vmName: ${vm2.name}
+      vmExtensionName: installNginx
+      publisher: Microsoft.Azure.Extensions
+      type: CustomScript
+      typeHandlerVersion: "2.1"
+      autoUpgradeMinorVersion: true
+      settings:
+        commandToExecute: |
+          sudo apt-get update
+          sudo apt-get install -y nginx
+          echo "<head><title>Web server 2</title></head><body><h1>Web Portal</h1><p>Web server 2</p></body>" | sudo tee /var/www/html/index.nginx-debian.html
+          sudo systemctl restart nginx
+
+
+  cpuMetricAlert:
+    type: azure-native:insights:MetricAlert
+    properties:
+      location: global
+      resourceGroupName: ${myResourceGroup.name}
+      ruleName: HighCpuUsageAlert
+      description: "Alert when CPU usage exceeds 80% over a 5-minute period"
+      severity: 3
+      enabled: true
+      scopes:
+        - ${vm1.id}
+      criteria:
+        odataType: Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria
+        allOf:
+          - criterionType: StaticThresholdCriterion
+            name: HighCPUUsage
+            metricName: Percentage CPU
+            metricNamespace: Microsoft.Compute/virtualMachines
+            timeAggregation: Average
+            operator: GreaterThan
+            threshold: 80
+      actions:
+        - actionGroupId: ${actionGroup.id}
+      evaluationFrequency: PT1M 
+      windowSize: PT5M       
+
+  actionGroup:
+    type: azure-native:insights:ActionGroup
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      actionGroupName: ${myResourceGroup.name}-actionGroup
+      groupShortName: agshortname
+      enabled: true
+      emailReceivers:
+        - name: AdminEmail
+          emailAddress: wi22b058@technikum-wien.at   
+  disk1:
+    type: azure-native:compute:Disk
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      diskName: ${myResourceGroup.name}-disk1
+      location: ${myResourceGroup.location}
+      diskSizeGB: 1024
+      sku:
+        name: Standard_LRS
+      creationData:
+        createOption: Empty
+
+  disk2:
+    type: azure-native:compute:Disk
+    properties:
+      resourceGroupName: ${myResourceGroup.name}
+      diskName: ${myResourceGroup.name}-disk2
+      location: ${myResourceGroup.location}
+      diskSizeGB: 1024
+      sku:
+        name: Standard_LRS
+      creationData:
+        createOption: Empty
+
+  # roleAssignment:
+  #   type: azure-native:authorization:RoleAssignment
+  #   properties:
+  #     principalId: ce2ce14e-85d7-4629-bdbc-454d0519d987
+  #     principalType: User
+  #     roleAssignmentName: 05c5a614-a7d6-4502-b150-c2fb455033ff
+  #     roleDefinitionId: /subscriptions/0e4dc046-40b5-4d62-a494-2e25538e24df/providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7
+  #     scope: subscriptions/0e4dc046-40b5-4d62-a494-2e25538e24df/resourceGroups/rg2
+
+outputs:
+  publicIpAddress:
+    value: ${publicIp.ipAddress}
