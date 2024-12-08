@@ -1,0 +1,214 @@
+name: PAAS
+description: Platofrm as a Service Project
+runtime: yaml
+
+resources:
+  # Create a resource group
+  resourceGroup:
+    type: azure-native:resources:ResourceGroup
+
+  # Create a virtual network
+  virtualNetwork:
+    type: azure-native:network:VirtualNetwork
+    name: myVNet
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      location: ${azure-native:location}
+      addressSpace:
+        addressPrefixes:
+          - 10.0.0.0/16
+
+
+# create 1 subnet for the app service
+  appSubnet:
+    type: azure-native:network:Subnet
+    properties:
+      subnetName: appSubnet
+      resourceGroupName: ${resourceGroup.name}
+      virtualNetworkName: ${virtualNetwork.name}
+      addressPrefix: 10.0.0.0/24
+      delegations:
+        - name: delegation
+          serviceName: Microsoft.Web/serverfarms
+      privateEndpointNetworkPolicies: Enabled
+
+
+  # create 1 subnet for the private endpoint and cognitive service
+  endpointSubnet:
+    type: azure-native:network:Subnet
+    name: endpointSubnet
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      virtualNetworkName: ${virtualNetwork.name}
+      addressPrefix: 10.0.1.0/24
+      privateEndpointNetworkPolicies: Disabled
+
+
+  # create a dns zone to link to the cognitive service
+  dnsZone:
+    type: azure-native:network:PrivateZone
+    name: privatelink.cognitiveservices.azure.com
+    properties:
+      privateZoneName: privatelink.cognitiveservices.azure.com
+      resourceGroupName: ${resourceGroup.name}
+      location: global
+
+
+  # create a cognitive service account
+  languageAccount:
+    type: azure-native:cognitiveservices:Account
+    name: myLanguageService
+    properties:
+      identity:
+          type: SystemAssigned
+      resourceGroupName: ${resourceGroup.name}
+      location: ${azure-native:location}
+      kind: TextAnalytics  
+      sku:
+        name: F0
+      properties:
+        publicNetworkAccess: Disabled
+        customSubDomainName: myLanguageService1234
+
+  # link the dns zone to the virtual network
+  dnsZoneVirtualNetworkLink:
+    type: azure-native:network:VirtualNetworkLink
+    name: cognitiveservices-zonelink
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      privateZoneName: ${dnsZone.name}
+      location: global
+      virtualNetwork:
+        id: ${virtualNetwork.id}
+      registrationEnabled: false
+
+  # create a private endpoint for the cognitive service to access it from the app service
+  privateEndpoint:
+    type: azure-native:network:PrivateEndpoint
+    name: languagePrivateEndpoint
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      location: ${azure-native:location}
+      subnet:
+        id: ${endpointSubnet.id}
+      privateLinkServiceConnections:
+        - name: languageServiceConnection
+          privateLinkServiceId: ${languageAccount.id}
+          groupIds:
+            - account
+
+  # create a private dns zone group to link the private endpoint to the dns zone
+  privateDnsZoneGroup:
+    type: azure-native:network:PrivateDnsZoneGroup
+    name: languagePrivateDnsZoneGroup
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      privateEndpointName: ${privateEndpoint.name}
+      privateDnsZoneConfigs:
+        - name: config
+          privateDnsZoneId: ${dnsZone.id}
+
+  # create a service plan for the app service
+  appServicePlan:
+    type: azure-native:web:AppServicePlan
+    name: myWebApp-plan
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      location: ${azure-native:location}
+      sku:
+        capacity: 3
+        name: B1
+        tier: Basic
+      kind: linux
+      reserved: true
+
+  # create the app service
+  webApp:
+    type: azure-native:web:WebApp
+    name: myWebApp
+    properties:
+      resourceGroupName: ${resourceGroup.name}
+      location: ${azure-native:location}
+      serverFarmId: ${appServicePlan.id}
+      httpsOnly: true
+      kind: app,linux
+      siteConfig:
+        linuxFxVersion: "PYTHON|3.8" 
+        appSettings:
+          - name: AZ_ENDPOINT
+            value:
+              fn::join:
+                  - ""
+                  - - "https://"
+                    - mylanguageservice1234.
+                    - "cognitiveservices.azure.com/"
+          - name: AZ_KEY
+            value: ${accountKeys.key1}
+          - name: WEBSITE_RUN_FROM_PACKAGE
+            value: "0"
+        alwaysOn: true
+        ftpsState: Disabled
+
+  # add the app service to the subnet 
+  vnetIntegration:
+    type: azure-native:web:WebAppSwiftVirtualNetworkConnection
+    properties:
+      name: ${webApp.name}
+      resourceGroupName: ${resourceGroup.name}
+      subnetResourceId: ${appSubnet.id}
+
+# get the app from GitHub
+  sourceControl:
+    type: azure-native:web:WebAppSourceControl
+    properties:
+      name: ${webApp.name}
+      resourceGroupName: ${resourceGroup.name}
+      repoUrl: ${my:repoUrl}
+      branch: ${my:branch}
+      isManualIntegration: true 
+      deploymentRollbackEnabled: false
+      isGitHubAction: false
+
+config:
+  azure-native:location: WestUS
+  my:repoUrl: https://github.com/flexlixrup/clco-demo
+  my:branch: main
+
+# add a budget to the subscription
+myBudget2:
+    type: azure-native:costmanagement:Budget
+    name: myBudget
+    properties:
+      scope: '/subscriptions/009d307a-a6d9-4bdf-a0ff-8502c4bb04fe'
+      amount: 5
+      category: Cost
+      timeGrain: Monthly
+      timePeriod:
+        startDate: '2024-11-01T00:00:00Z' 
+        endDate: '2025-12-31T00:00:00Z'  
+      notifications:
+        Actual_GreaterThan_80_Percent:
+          enabled: true
+          operator: GreaterThan
+          threshold: 80
+          contactEmails:
+            - 'felixruppert@icloud.com'
+          thresholdType: Actual
+        Forecasted_GreaterThan_100_Percent:
+          enabled: true 
+          operator: GreaterThan
+          threshold: 100
+          contactEmails:
+            - 'felixruppert@icloud.com'
+          thresholdType: Forecasted
+
+
+
+variables:
+  accountKeys:
+    fn::invoke:
+      function: azure-native:cognitiveservices:listAccountKeys
+      arguments:
+        resourceGroupName: ${resourceGroup.name}
+        accountName: ${languageAccount.name}
+    
