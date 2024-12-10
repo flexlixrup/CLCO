@@ -1,24 +1,24 @@
 config:
   azure-native:location: germanywestcentral
 name: IaaS
-description: Create a load balancer with two VMs
+description: Create a load balancer with two VMs 
 runtime: yaml
 
 resources:
-  sa:
-    type: azure-native:storage:StorageAccount
+  sa: #Create storage account for boot diagnostics stored in blobs
+    type: azure-native:storage:StorageAccount 
     properties:
       resourceGroupName: ${myResourceGroup.name}
       sku:
         name: Standard_LRS
       kind: StorageV2
       
-  myResourceGroup:
+  myResourceGroup: #Create resource group (rg2)
     type: azure-native:resources:ResourceGroup
     properties:
       resourceGroupName: rg2
 
-  vnet:
+  vnet: #Create virtual network (rg2-vnet) for deploying VMs etc.
     type: azure-native:network:VirtualNetwork
     properties:
       resourceGroupName: ${myResourceGroup.name}
@@ -26,24 +26,24 @@ resources:
       virtualNetworkName: ${myResourceGroup.name}-vnet
       addressSpace:
         addressPrefixes:
-          - "10.0.0.0/16"
+          - "10.0.0.0/16" #IP range (65,536 addresses)
 
-  subnet:
+  subnet: #Create subnet (rg2-subnet) to divide the vnet into smaller segments 
     type: azure-native:network:Subnet
     properties:
       resourceGroupName: ${myResourceGroup.name}
       virtualNetworkName: ${vnet.name}
       subnetName: ${myResourceGroup.name}-subnet
-      addressPrefix: "10.0.1.0/24"
+      addressPrefix: "10.0.1.0/24" #Ip range (256 addresses) within the vnet
 
-  nsg:
+  nsg: #Create network security group to control inbound and outbound traffic
     type: azure-native:network:NetworkSecurityGroup
     properties:
       resourceGroupName: ${myResourceGroup.name}
       
       networkSecurityGroupName: ${myResourceGroup.name}-nsg
 
-  allow80InboundRule:
+  allow80InboundRule: #Create security rule to only allow inbound traffic on port 80 (HTTP)
     type: azure-native:network:SecurityRule
     properties:
       resourceGroupName: ${myResourceGroup.name}
@@ -53,12 +53,12 @@ resources:
       direction: Inbound
       access: Allow
       protocol: Tcp
-      sourcePortRange: "*"
+      sourcePortRange: "*" #No restrictions on source port
       destinationPortRange: "80"
-      sourceAddressPrefix: "*"
-      destinationAddressPrefix: "*"
+      sourceAddressPrefix: "*" # No restrictions on source address
+      destinationAddressPrefix: "*" # Rule applies to any destination IP address
 
-  publicIp:
+  publicIp: #Create static public ip address (give access to resources in private network)
     type: azure-native:network:PublicIPAddress
     properties:
       resourceGroupName: ${myResourceGroup.name}
@@ -67,32 +67,32 @@ resources:
       sku:
         name: Standard
       publicIPAllocationMethod: Static
-      zones:
+      zones: #distribute into zones to prevent outage
         - "1"
         - "2"
         - "3"
 
-  loadBalancer:
+  loadBalancer: #Create load balancer with frontend IP configuration, backend address pool, health probe, and load balancing rules
     type: azure-native:network:LoadBalancer
     properties:
       resourceGroupName: ${myResourceGroup.name}
       loadBalancerName: myLoadBalancer
       sku:
         name: Standard
-      frontendIPConfigurations:
+      frontendIPConfigurations: # Use public IP address for access
         - name: myFrontEnd
           publicIPAddress:
             id: ${publicIp.id}
-      backendAddressPools:
+      backendAddressPools: # Load balancer sends traffic to the backend pool
         - name: myBackEndPool
-      probes:
+      probes: # Health probe to check the health (2 failed attempts) of the VMs
         - name: httpProbe
           protocol: Http
           port: 80
           requestPath: "/"
           intervalInSeconds: 15
           numberOfProbes: 2
-      loadBalancingRules:
+      loadBalancingRules: # Load balancing rule to define how traffic is forwarded from front to backend
         - name: httpRule
           frontendIPConfiguration:
             id: /subscriptions/0e4dc046-40b5-4d62-a494-2e25538e24df/resourceGroups/rg2/providers/Microsoft.Network/loadBalancers/myLoadBalancer/frontendIPConfigurations/myFrontEnd
@@ -107,7 +107,7 @@ resources:
           idleTimeoutInMinutes: 4
           loadDistribution: Default
 
-  nic1:
+  nic1: #Create two network interfaces for connecting the VMs to the network (allowing connectivity of Vms to VNet and load balancer)
     type: azure-native:network:NetworkInterface
     properties:
       resourceGroupName: ${myResourceGroup.name}
@@ -139,7 +139,7 @@ resources:
       networkSecurityGroup:
         id: ${nsg.id}
 
-  vm1:
+  vm1: #Create two virtual machines with managed disks, which serve as web servers
     type: azure-native:compute:VirtualMachine
     properties:
       resourceGroupName: ${myResourceGroup.name}
@@ -150,7 +150,7 @@ resources:
           - id: ${nic1.id}
       hardwareProfile:
         vmSize: Standard_DS1_v2
-      diagnosticsProfile:
+      diagnosticsProfile: # enable boot diagnostics to store logs
         bootDiagnostics:
           enabled: true
           storageUri:  ${sa.primaryEndpoints.blob}
@@ -162,12 +162,12 @@ resources:
           offer: 0001-com-ubuntu-server-jammy
           sku: 22_04-lts
           version: latest
-        dataDisks:
+        dataDisks: # attach disk to vm
         - lun: 0
           createOption: Attach
           managedDisk:
             id: ${disk1.id}
-      osProfile:
+      osProfile: # setup vm with name and sshkey
         adminUsername: azureuser
         computerName: vm1
         linuxConfiguration:
@@ -208,13 +208,13 @@ resources:
       osProfile:
         adminUsername: azureuser
         computerName: vm2
-        linuxConfiguration:
+        linuxConfiguration: # disable password authentication and add ssh key
           disablePasswordAuthentication: true
           ssh:
             publicKeys:
               - keyData: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDHek23ia0vMDzs0lo9jtEQ72XSMu6c4HV+xD3DwAx58MQxTKjwomCd4MKHW11iMyF0YK7L+Nma9sVrGjMHOvNyB4oJCniYvas12fzeAlYWAodTFufuP6D3xQuc2dqI+ePyLWRGfwMx9nT89eKSf53eTyAsXkAymZctOc9n4H7aaP/3lGSkrDWbk428kkOdvCypiE6sH53/P9zQSSMAtlt1K2b9ga1yZqifjWbd8DtZKXU83WQURN95B+P4nfVg8xERz7Q2H6h7gmZ70DGfheKJPR6JzlqoMp4FkeWLhrZVPoiMU8JMjfIy7vth6cUePHBP9aQ9JC+JGJyJKuCJnoFp bruno@LAPTOP-DQK8700Q
                 path: /home/azureuser/.ssh/authorized_keys
-
+# Extension to install Nginx on both VMs
   vm1Extension:
     type: azure-native:compute:VirtualMachineExtension
     properties:
@@ -252,7 +252,7 @@ resources:
           sudo systemctl restart nginx
 
 
-  cpuMetricAlert:
+  cpuMetricAlert: #Create alert to if cpu usage exceeds 80% for 5 mins
     type: azure-native:insights:MetricAlert
     properties:
       location: global
@@ -278,7 +278,7 @@ resources:
       evaluationFrequency: PT1M 
       windowSize: PT5M       
 
-  actionGroup:
+  actionGroup: # Create action group to send email if alert is triggered
     type: azure-native:insights:ActionGroup
     properties:
       resourceGroupName: ${myResourceGroup.name}
@@ -288,7 +288,7 @@ resources:
       emailReceivers:
         - name: AdminEmail
           emailAddress: wi22b058@technikum-wien.at   
-  disk1:
+  disk1: #Create data disks for storage of the VMs
     type: azure-native:compute:Disk
     properties:
       resourceGroupName: ${myResourceGroup.name}
@@ -312,14 +312,15 @@ resources:
       creationData:
         createOption: Empty
 
-  # roleAssignment:
-  #   type: azure-native:authorization:RoleAssignment
-  #   properties:
-  #     principalId: ce2ce14e-85d7-4629-bdbc-454d0519d987
-  #     principalType: User
-  #     roleAssignmentName: 05c5a614-a7d6-4502-b150-c2fb455033ff
-  #     roleDefinitionId: /subscriptions/0e4dc046-40b5-4d62-a494-2e25538e24df/providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7
-  #     scope: subscriptions/0e4dc046-40b5-4d62-a494-2e25538e24df/resourceGroups/rg2
+  roleAssignment: # Assign the Reader role to a user for the resource group rg2 within the specified subscription
+    type: azure-native:authorization:RoleAssignment
+    properties:
+      principalId: 0ddfb70b-c6e1-459b-9bf6-956680a85d9f
+      principalType: User
+      roleAssignmentName: 05c5a614-a7d6-4502-b150-c2fb455033ff
+      roleDefinitionId: /subscriptions/0e4dc046-40b5-4d62-a494-2e25538e24df/providers/Microsoft.Authorization/roleDefinitions/acdd72a7-3385-48ef-bd42-f606fba81ae7
+      scope: subscriptions/0e4dc046-40b5-4d62-a494-2e25538e24df/resourceGroups/rg2
+
 
 outputs:
   publicIpAddress:
